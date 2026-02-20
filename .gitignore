@@ -1,0 +1,27 @@
+# --- Rust / Cargo ---
+**/target/
+**/*.rs.bk
+backend/Cargo.lock
+# (Keep Cargo.lock if this is an executable/binary, which it is!)
+
+# --- Environment & Secrets ---
+.env
+.env.local
+.env.*.local
+config.toml
+
+# --- SQLx ---
+# If you use offline mode for SQLx (sqlx-data.json), 
+# you might want to keep that, but usually, we ignore local caches.
+.sqlx/
+
+# --- Operating System ---
+.DS_Store
+Thumbs.db
+
+# --- Frontend (Future-proofing) ---
+node_modules/
+/dist/
+/.next/
+/out/
+.eslintcache

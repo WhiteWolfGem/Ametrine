@@ -1,0 +1,15 @@
+# config.toml
+database_url = "postgres://username:password@localhost:5432/database"
+run_migrations = true
+server_addr = "127.0.0.1:3000"
+allow_debug_headers = false
+
+
+[[sites]]
+domain = "localhost:3000"
+auth = true
+
+[[sites]]
+domain = "example.com"
+auth = false
+
