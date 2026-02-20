@@ -26,10 +26,10 @@ impl IntoResponse for AppError {
         let (status, error_message) = match self {
             AppError::Database(ref e) => {
                 println!("Database Error: {:?}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, "Resource not found")
+                (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong")
             }
-            AppError::NotFound => (StatusCode::NOT_FOUND, "Unauthorized Access"),
-            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, ""),
+            AppError::NotFound => (StatusCode::NOT_FOUND, "Resource not found"),
+            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized Access"),
             AppError::Anyhow(ref e) => {
                 println!("System Error: {:?}", e);
                 (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong")

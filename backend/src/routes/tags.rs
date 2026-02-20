@@ -4,6 +4,7 @@ use crate::params::SearchParams;
 use axum::{
     Json,
     extract::{Path, Query, State},
+    http::StatusCode,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -61,7 +62,7 @@ pub async fn increment_tag_selection(
     State(pool): State<PgPool>,
     site: SiteIdentity,
     Path(tag_uuid): Path<uuid::Uuid>,
-) -> Result<axum::http::StatusCode, AppError> {
+) -> Result<StatusCode, AppError> {
     let result = sqlx::query!(
         r#"
             UPDATE tag_stats
@@ -78,5 +79,5 @@ pub async fn increment_tag_selection(
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound);
     }
-    Ok(axum::http::StatusCode::NO_CONTENT)
+    Ok(StatusCode::NO_CONTENT)
 }
