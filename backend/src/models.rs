@@ -10,7 +10,11 @@ pub struct Post {
     pub title: String,
     pub content: String,
     pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
     pub tags: serde_json::Value,
+    pub signature: Option<String>,
+    pub is_mature: bool,
+    pub summary: Option<String>,
 }
 
 #[derive(Serialize, sqlx::FromRow)]

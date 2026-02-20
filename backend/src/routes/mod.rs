@@ -4,7 +4,7 @@ pub mod tags;
 use crate::AppState;
 use axum::{
     Router,
-    routing::{delete, get, post},
+    routing::{get, post},
 };
 
 pub fn create_router(state: AppState) -> Router {
@@ -17,10 +17,10 @@ pub fn create_router(state: AppState) -> Router {
 pub fn post_routes() -> Router<AppState> {
     Router::new()
         .route("/", get(posts::get_posts).post(posts::create_post))
-        .route("/{id}", get(posts::get_one_post))
-        .route(
-            "/{uuid}",
-            delete(posts::delete_post).put(posts::update_post),
+        .route("/{id}", 
+            get(posts::get_one_post)
+            .put(posts::update_post)
+            .delete(posts::delete_post)
         )
 }
 

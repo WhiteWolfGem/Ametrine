@@ -30,7 +30,11 @@ pub struct PostResponse {
     title: String,
     content: String,
     created: DateTime<Utc>,
+    updated: DateTime<Utc>,
     tags: serde_json::Value,
+    signature: Option<String>,
+    is_mature: bool,
+    summary: Option<String>,
 }
 
 impl From<Post> for PostResponse {
@@ -41,7 +45,11 @@ impl From<Post> for PostResponse {
             title: post.title,
             content: post.content,
             created: post.created_at,
+            updated: post.updated_at,
             tags: post.tags,
+            signature: post.signature,
+            is_mature: post.is_mature,
+            summary: post.summary,
         }
     }
 }
@@ -60,7 +68,11 @@ pub async fn get_one_post(
                 slug,
                 content, 
                 created_at, 
-                tags 
+                updated_at,
+                tags,
+                signature,
+                is_mature,
+                summary
             FROM 
                 posts
             WHERE
@@ -80,7 +92,11 @@ pub async fn get_one_post(
                 slug,
                 content, 
                 created_at, 
-                tags 
+                updated_at,
+                tags,
+                signature,
+                is_mature,
+                summary
             FROM 
                 posts
             WHERE
@@ -123,7 +139,11 @@ pub async fn get_posts(
             slug,
             content, 
             created_at, 
-            tags 
+            updated_at,
+            tags,
+            signature,
+            is_mature,
+            summary
         FROM 
             posts
         WHERE
@@ -158,6 +178,9 @@ pub struct CreatePostRequest {
     pub content: String,
     pub tags: Vec<String>,
     pub visibility_mask: i32,
+    pub signature: Option<String>,
+    pub is_mature: bool,
+    pub summary: Option<String>,
 }
 
 pub async fn create_post(
@@ -182,9 +205,29 @@ pub async fn create_post(
 
     let post = sqlx::query_as::<_, Post>(
         r#"
-            INSERT INTO posts (uuid, title, slug, content, tags, visibility_mask)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING id,uuid,title,slug,content, created_at,tags
+            INSERT INTO posts (
+                uuid, 
+                title, 
+                slug, 
+                content, 
+                tags, 
+                visibility_mask,
+                signature,
+                is_mature,
+                summary
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            RETURNING 
+            id,
+            uuid,
+            title,
+            slug,
+            content,
+            created_at,
+            updated_at,
+            tags,
+            signature,
+            is_mature,
+            summary
         "#,
     )
     .bind(new_uuid)
@@ -193,6 +236,9 @@ pub async fn create_post(
     .bind(&payload.content)
     .bind(&tags_json)
     .bind(payload.visibility_mask)
+    .bind(&payload.signature)
+    .bind(payload.is_mature)
+    .bind(&payload.summary)
     .fetch_one(&mut *tx)
     .await?;
 
@@ -262,6 +308,9 @@ pub struct UpdatePostRequest {
     pub content: String,
     pub tags: Vec<String>,
     pub visibility_mask: i32,
+    pub signature: Option<String>,
+    pub is_mature: bool,
+    pub summary: Option<String>,
 }
 
 pub async fn update_post(
@@ -334,9 +383,13 @@ pub async fn update_post(
                     slug = $2,
                     content = $3,
                     tags = $4,
-                    visibility_mask = $5
+                    visibility_mask = $5,
+                    signature = $6,
+                    is_mature = $7,
+                    summary = $8,
+                    updated_at = $9
                 WHERE 
-                    uuid = $6
+                    uuid = $10
                 RETURNING 
                     id,
                     uuid,
@@ -344,7 +397,11 @@ pub async fn update_post(
                     slug,
                     content,
                     created_at,
-                    tags
+                    updated_at,
+                    tags,
+                    signature,
+                    is_mature,
+                    summary
             "#,
     )
     .bind(&payload.title)
@@ -352,6 +409,10 @@ pub async fn update_post(
     .bind(&payload.content)
     .bind(&tags_json)
     .bind(payload.visibility_mask)
+    .bind(&payload.signature)
+    .bind(payload.is_mature)
+    .bind(&payload.summary)
+    .bind(Utc::now())
     .bind(uuid)
     .fetch_one(&mut *tx)
     .await?;
