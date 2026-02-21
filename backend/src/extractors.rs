@@ -42,18 +42,26 @@ where
             }
         }
 
-        let site = sqlx::query!(
+        let site_result = sqlx::query!(
             "SELECT site_mask_bit, requires_auth FROM sites WHERE domain = $1",
             host
         )
         .fetch_optional(&pool)
-        .await?
-        .ok_or_else(|| AppError::unauthorized())?;
+        .await?;
+
+        let (mask, requires_auth) = match site_result {
+            Some(s) => (s.site_mask_bit, s.requires_auth.unwrap_or(false)),
+            None if host.starts_with("localhost") || host.starts_with("127.0.0.1") => {
+                // Default identity for localhost setup/admin
+                (1, true)
+            }
+            None => return Err(AppError::unauthorized()),
+        };
 
         Ok(SiteIdentity {
-            mask: site.site_mask_bit,
+            mask,
             domain: host,
-            requires_auth: site.requires_auth.unwrap_or(false),
+            requires_auth,
             gpg_email: config.gpg_email.clone(),
         })
     }

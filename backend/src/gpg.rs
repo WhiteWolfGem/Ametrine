@@ -1,12 +1,12 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
+use hickory_resolver::Resolver;
 use hickory_resolver::config::*;
 use hickory_resolver::name_server::TokioConnectionProvider;
 use hickory_resolver::proto::rr::{RData, RecordType};
-use hickory_resolver::Resolver;
 use sha2::{Digest, Sha256};
 use std::io::BufReader;
 
-use pgp::composed::{Deserializable, SignedPublicKey, DetachedSignature};
+use pgp::composed::{Deserializable, DetachedSignature, SignedPublicKey};
 
 pub struct GpgVerifier {
     email: String,
@@ -17,6 +17,7 @@ impl GpgVerifier {
         Self { email }
     }
 
+    // Work out the dns path by splitting email
     fn get_dns_path(&self) -> Result<String> {
         let parts: Vec<&str> = self.email.split('@').collect();
         if parts.len() != 2 {
@@ -29,6 +30,7 @@ impl GpgVerifier {
         Ok(format!("{}._openpgpkey.{}", hash, domain))
     }
 
+    // Get OPENPGPKEY dns record from email
     pub async fn fetch_public_key(&self) -> Result<Vec<u8>> {
         let resolver = Resolver::builder_with_config(
             ResolverConfig::default(),
@@ -48,20 +50,19 @@ impl GpgVerifier {
         }
     }
 
-    /// Verify content against a detached signature
+    /// Verify the content with the provided signature
     pub async fn verify(&self, content: &str, signature_armor: &str) -> Result<()> {
         let key_data = self.fetch_public_key().await?;
-        
-        // OPENPGPKEY records are raw binary bytes. 
-        // We use from_bytes which expects a BufRead.
+
+        //Get key from dns record
         let pubkey = SignedPublicKey::from_bytes(BufReader::new(&key_data[..]))
             .map_err(|e| anyhow!("Failed to parse public key: {}", e))?;
 
-        // Parse the signature. It should be armored in the config/post.
+        // Get armored signature
         let (sig, _) = DetachedSignature::from_string(signature_armor)
             .map_err(|e| anyhow!("Failed to parse armored signature: {}", e))?;
 
-        // Verify the signature against the content
+        // Verify the signature against the blog content
         sig.verify(&pubkey, content.as_bytes())
             .map_err(|e| anyhow!("GPG Verification failed: {}", e))?;
 

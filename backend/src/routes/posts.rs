@@ -37,6 +37,7 @@ pub struct PostResponse {
     signature: Option<String>,
     is_mature: bool,
     summary: Option<String>,
+    author_uuid: Option<uuid::Uuid>,
 }
 
 impl From<Post> for PostResponse {
@@ -52,6 +53,7 @@ impl From<Post> for PostResponse {
             signature: post.signature,
             is_mature: post.is_mature,
             summary: post.summary,
+            author_uuid: post.author_uuid,
         }
     }
 }
@@ -74,7 +76,8 @@ pub async fn get_one_post(
                 tags,
                 signature,
                 is_mature,
-                summary
+                summary,
+                author_uuid
             FROM 
                 posts
             WHERE
@@ -98,7 +101,8 @@ pub async fn get_one_post(
                 tags,
                 signature,
                 is_mature,
-                summary
+                summary,
+                author_uuid
             FROM 
                 posts
             WHERE
@@ -192,6 +196,7 @@ pub struct CreatePostRequest {
     pub signature: Option<String>,
     pub is_mature: bool,
     pub summary: Option<String>,
+    pub author_uuid: Option<uuid::Uuid>,
 }
 
 pub async fn create_post(
@@ -208,14 +213,29 @@ pub async fn create_post(
         return Err(AppError::unauthorized().at_site(&site));
     }
 
-    if let (Some(email), Some(sig)) = (&site.gpg_email, &payload.signature) {
-        let verifier = GpgVerifier::new(email.clone());
-        verifier.verify(&payload.content, sig).await.map_err(|e| {
-            AppError::bad_request()
-                .with_message("GPG verification failed")
-                .with_debug(e.to_string())
-                .at_site(&site)
-        })?;
+    if let Some(sig) = &payload.signature {
+        let email = if let Some(author_uuid) = payload.author_uuid {
+            sqlx::query("SELECT signing_email FROM authors WHERE uuid = $1")
+                .bind(author_uuid)
+                .fetch_optional(&pool)
+                .await?
+                .and_then(|r| {
+                    use sqlx::Row;
+                    r.try_get::<Option<String>, _>("signing_email").unwrap_or(None)
+                })
+        } else {
+            site.gpg_email.clone()
+        };
+
+        if let Some(email) = email {
+            let verifier = GpgVerifier::new(email);
+            verifier.verify(&payload.content, sig).await.map_err(|e| {
+                AppError::bad_request()
+                    .with_message("GPG verification failed")
+                    .with_debug(e.to_string())
+                    .at_site(&site)
+            })?;
+        }
     }
 
     let new_uuid = uuid::Uuid::new_v4();
@@ -242,8 +262,9 @@ pub async fn create_post(
                 visibility_mask,
                 signature,
                 is_mature,
-                summary
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                summary,
+                author_uuid
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING 
             id,
             uuid,
@@ -255,7 +276,8 @@ pub async fn create_post(
             tags,
             signature,
             is_mature,
-            summary
+            summary,
+            author_uuid
         "#,
     )
     .bind(new_uuid)
@@ -267,6 +289,7 @@ pub async fn create_post(
     .bind(&payload.signature)
     .bind(payload.is_mature)
     .bind(&payload.summary)
+    .bind(payload.author_uuid)
     .fetch_one(&mut *tx)
     .await?;
 
@@ -345,6 +368,7 @@ pub struct UpdatePostRequest {
     pub signature: Option<String>,
     pub is_mature: bool,
     pub summary: Option<String>,
+    pub author_uuid: Option<uuid::Uuid>,
 }
 
 pub async fn update_post(
@@ -359,14 +383,29 @@ pub async fn update_post(
             .at_site(&site)
     })?;
 
-    if let (Some(email), Some(sig)) = (&site.gpg_email, &payload.signature) {
-        let verifier = GpgVerifier::new(email.clone());
-        verifier.verify(&payload.content, sig).await.map_err(|e| {
-            AppError::bad_request()
-                .with_message("GPG verification failed")
-                .with_debug(e.to_string())
-                .at_site(&site)
-        })?;
+    if let Some(sig) = &payload.signature {
+        let email = if let Some(author_uuid) = payload.author_uuid {
+            sqlx::query("SELECT signing_email FROM authors WHERE uuid = $1")
+                .bind(author_uuid)
+                .fetch_optional(&pool)
+                .await?
+                .and_then(|r| {
+                    use sqlx::Row;
+                    r.try_get::<Option<String>, _>("signing_email").unwrap_or(None)
+                })
+        } else {
+            site.gpg_email.clone()
+        };
+
+        if let Some(email) = email {
+            let verifier = GpgVerifier::new(email);
+            verifier.verify(&payload.content, sig).await.map_err(|e| {
+                AppError::bad_request()
+                    .with_message("GPG verification failed")
+                    .with_debug(e.to_string())
+                    .at_site(&site)
+            })?;
+        }
     }
 
     if !site.requires_auth {
@@ -452,9 +491,10 @@ pub async fn update_post(
                     signature = $6,
                     is_mature = $7,
                     summary = $8,
-                    updated_at = $9
+                    updated_at = $9,
+                    author_uuid = $10
                 WHERE 
-                    uuid = $10
+                    uuid = $11
                 RETURNING 
                     id,
                     uuid,
@@ -466,7 +506,8 @@ pub async fn update_post(
                     tags,
                     signature,
                     is_mature,
-                    summary
+                    summary,
+                    author_uuid
             "#,
     )
     .bind(&payload.title)
@@ -478,6 +519,7 @@ pub async fn update_post(
     .bind(payload.is_mature)
     .bind(&payload.summary)
     .bind(Utc::now())
+    .bind(payload.author_uuid)
     .bind(uuid)
     .fetch_one(&mut *tx)
     .await

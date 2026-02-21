@@ -1,12 +1,7 @@
 use ::config::{Config, ConfigError, Environment, File};
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct SiteConfig {
-    pub domain: String,
-    pub auth: bool,
-}
-
+// The App config
 #[derive(Debug, Deserialize, Clone)]
 pub struct AppConfig {
     pub database_url: String,
@@ -14,9 +9,9 @@ pub struct AppConfig {
     pub server_addr: String,
     pub allow_debug_headers: bool,
     pub gpg_email: Option<String>,
-    pub sites: Vec<SiteConfig>,
 }
 
+// Load up the config
 impl AppConfig {
     pub fn load() -> Result<Self, ConfigError> {
         let s = Config::builder()

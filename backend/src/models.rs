@@ -15,6 +15,7 @@ pub struct Post {
     pub signature: Option<String>,
     pub is_mature: bool,
     pub summary: Option<String>,
+    pub author_uuid: Option<Uuid>,
 }
 
 #[derive(Serialize, sqlx::FromRow)]
@@ -23,5 +24,24 @@ pub struct Tag {
     pub tag_uuid: Uuid,
     pub use_count: i32,
     pub selected_count: i32,
+    pub visibility_mask: i32,
+}
+
+#[derive(Serialize, Deserialize, sqlx::FromRow)]
+pub struct Author {
+    pub id: i32,
+    pub uuid: Uuid,
+    pub name: String,
+    pub bio: Option<String>,
+    pub signing_email: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, sqlx::FromRow)]
+pub struct AuthorSocial {
+    pub id: i32,
+    pub author_uuid: Uuid,
+    pub platform: String,
+    pub handle: String,
+    pub url: Option<String>,
     pub visibility_mask: i32,
 }

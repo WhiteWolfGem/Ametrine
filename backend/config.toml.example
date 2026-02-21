@@ -4,13 +4,3 @@ run_migrations = true
 server_addr = "127.0.0.1:3000"
 gpg_email = "good-bean@example.com"
 allow_debug_headers = false
-
-
-[[sites]]
-domain = "localhost:3000"
-auth = true
-
-[[sites]]
-domain = "example.com"
-auth = false
-

@@ -1,5 +1,4 @@
-use crate::error::AppError;
-use crate::extractors::SiteIdentity;
+use crate::{error::AppError, extractors::SiteIdentity, models::Tag};
 use crate::params::SearchParams;
 use axum::{
     Json,
@@ -21,6 +20,49 @@ pub enum TagSort {
 pub struct TagResponse {
     pub name: String,
     pub uuid: uuid::Uuid,
+}
+
+pub async fn admin_fetch_tags(
+    State(pool): State<PgPool>,
+    site: SiteIdentity,
+    params: Result<Query<SearchParams<TagSort>>, QueryRejection>,
+) -> Result<Json<Vec<Tag>>, AppError> {
+    if !site.requires_auth {
+        return Err(AppError::unauthorized().at_site(&site));
+    }
+
+    let Query(params) = params.map_err(|e| {
+        AppError::bad_request()
+            .with_debug(e.to_string())
+            .at_site(&site)
+    })?;
+
+    let order_col = match params.sort() {
+        Some(TagSort::Popularity) => "selected_count",
+        Some(TagSort::Usage) => "use_count",
+        _ => "tag_name",
+    };
+
+    let direction = params.sort_by().to_sql();
+    let search_pattern = params.search().map(|s| format!("%{}%", s));
+
+    let query = format!(
+        "SELECT tag_name, tag_uuid, use_count, selected_count, visibility_mask FROM tag_stats
+         WHERE ($3::TEXT IS NULL OR tag_name ILIKE $3)
+         ORDER BY {} {}, tag_name ASC
+         LIMIT $1 OFFSET $2",
+        order_col, direction
+    );
+
+    let tags = sqlx::query_as::<_, Tag>(&query)
+        .bind(params.limit())
+        .bind(params.offset())
+        .bind(search_pattern)
+        .fetch_all(&pool)
+        .await
+        .map_err(|e| AppError::from(e).at_site(&site))?;
+
+    Ok(Json(tags))
 }
 
 pub async fn fetch_tags(
