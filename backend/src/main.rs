@@ -2,6 +2,7 @@ mod config;
 mod db;
 mod error;
 mod extractors;
+mod gpg;
 mod models;
 mod params;
 mod routes;

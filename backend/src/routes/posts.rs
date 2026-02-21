@@ -1,7 +1,9 @@
-use crate::{error::AppError, extractors::SiteIdentity, models::Post, params::SearchParams};
+use crate::{
+    error::AppError, extractors::SiteIdentity, gpg::GpgVerifier, models::Post, params::SearchParams,
+};
 use axum::{
     Json,
-    extract::{Path, Query, State},
+    extract::{Path, Query, State, rejection::QueryRejection},
     http::StatusCode,
 };
 use chrono::{DateTime, Utc};
@@ -110,16 +112,24 @@ pub async fn get_one_post(
     };
     let post = query
         .fetch_optional(&pool)
-        .await?
-        .ok_or(AppError::NotFound)?;
+        .await
+        .map_err(|e| AppError::from(e).at_site(&site))?
+        .ok_or_else(|| AppError::not_found().at_site(&site))?;
 
     Ok(Json(post.into()))
 }
+
 pub async fn get_posts(
     State(pool): State<PgPool>,
     site: SiteIdentity,
-    Query(params): Query<PostParams>,
+    params: Result<Query<PostParams>, QueryRejection>,
 ) -> Result<Json<Vec<PostResponse>>, AppError> {
+    let Query(params) = params.map_err(|e| {
+        AppError::bad_request()
+            .with_debug(e.to_string())
+            .at_site(&site)
+    })?;
+
     let limit = params.base.limit();
     let offset = params.base.offset();
     let column = match params.base.sort() {
@@ -164,7 +174,8 @@ pub async fn get_posts(
         .bind(&params.tag)
         .bind(search_pattern)
         .fetch_all(&pool)
-        .await?;
+        .await
+        .map_err(|e| AppError::from(e).at_site(&site))?;
 
     let response: Vec<PostResponse> = posts.into_iter().map(|p| p.into()).collect();
 
@@ -189,19 +200,36 @@ pub async fn create_post(
     axum::Json(payload): axum::Json<CreatePostRequest>,
 ) -> Result<Json<PostResponse>, AppError> {
     if !site.requires_auth {
-        return Err(AppError::Unauthorized);
+        return Err(AppError::unauthorized().at_site(&site));
     }
 
     if !site.domain.starts_with("localhost") && !site.domain.starts_with("127.0.0.1") {
         // TODO: JWT/Oauth stuff here
-        return Err(AppError::Unauthorized);
+        return Err(AppError::unauthorized().at_site(&site));
+    }
+
+    if let (Some(email), Some(sig)) = (&site.gpg_email, &payload.signature) {
+        let verifier = GpgVerifier::new(email.clone());
+        verifier.verify(&payload.content, sig).await.map_err(|e| {
+            AppError::bad_request()
+                .with_message("GPG verification failed")
+                .with_debug(e.to_string())
+                .at_site(&site)
+        })?;
     }
 
     let new_uuid = uuid::Uuid::new_v4();
-    let tags_json = serde_json::to_value(&payload.tags)
-        .map_err(|_| AppError::Anyhow(anyhow::anyhow!("Failed to parse tags")))?;
+    let tags_json = serde_json::to_value(&payload.tags).map_err(|e| {
+        AppError::bad_request()
+            .with_message("Failed to parse tags")
+            .with_debug(e.to_string())
+            .at_site(&site)
+    })?;
 
-    let mut tx = pool.begin().await?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| AppError::from(e).at_site(&site))?;
 
     let post = sqlx::query_as::<_, Post>(
         r#"
@@ -259,18 +287,24 @@ pub async fn create_post(
             payload.visibility_mask
         )
         .execute(&mut *tx)
-        .await?;
+        .await
+        .map_err(|e| AppError::from(e).at_site(&site))?;
     }
 
-    tx.commit().await?;
+    tx.commit()
+        .await
+        .map_err(|e| AppError::from(e).at_site(&site))?;
 
     Ok(Json(post.into()))
 }
 
 pub async fn delete_post(
     State(pool): State<PgPool>,
-    Path(uuid): Path<uuid::Uuid>,
+    Path(identifier): Path<String>,
 ) -> Result<axum::http::StatusCode, AppError> {
+    // We don't have SiteIdentity here, but we can still return a clean error
+    let uuid = uuid::Uuid::parse_str(&identifier)
+        .map_err(|e| AppError::bad_request().with_debug(e.to_string()))?;
     let mut tx = pool.begin().await?;
 
     sqlx::query!(
@@ -316,25 +350,50 @@ pub struct UpdatePostRequest {
 pub async fn update_post(
     State(pool): State<PgPool>,
     site: SiteIdentity,
-    Path(uuid): Path<uuid::Uuid>,
+    Path(identifier): Path<String>,
     Json(payload): Json<UpdatePostRequest>,
 ) -> Result<Json<PostResponse>, AppError> {
-    if !site.requires_auth {
-        return Err(AppError::Unauthorized);
-    }
-    if !site.domain.starts_with("localhost") && !site.domain.starts_with("127.0.0.1") {
-        return Err(AppError::Unauthorized);
+    let uuid = uuid::Uuid::parse_str(&identifier).map_err(|e| {
+        AppError::bad_request()
+            .with_debug(e.to_string())
+            .at_site(&site)
+    })?;
+
+    if let (Some(email), Some(sig)) = (&site.gpg_email, &payload.signature) {
+        let verifier = GpgVerifier::new(email.clone());
+        verifier.verify(&payload.content, sig).await.map_err(|e| {
+            AppError::bad_request()
+                .with_message("GPG verification failed")
+                .with_debug(e.to_string())
+                .at_site(&site)
+        })?;
     }
 
-    let mut tx = pool.begin().await?;
+    if !site.requires_auth {
+        return Err(AppError::unauthorized().at_site(&site));
+    }
+    if !site.domain.starts_with("localhost") && !site.domain.starts_with("127.0.0.1") {
+        return Err(AppError::unauthorized().at_site(&site));
+    }
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| AppError::from(e).at_site(&site))?;
 
     let old_post = sqlx::query!("SELECT tags FROM posts WHERE uuid = $1", uuid)
         .fetch_optional(&mut *tx)
-        .await?
-        .ok_or(AppError::NotFound)?;
+        .await
+        .map_err(|e| AppError::from(e).at_site(&site))?
+        .ok_or_else(|| AppError::not_found().at_site(&site))?;
 
-    let old_tags: Vec<String> = serde_json::from_value(old_post.tags.unwrap_or_default())
-        .map_err(|_| AppError::Anyhow(anyhow::anyhow!("Failed to parse old tags")))?;
+    let old_tags: Vec<String> =
+        serde_json::from_value(old_post.tags.unwrap_or_default()).map_err(|e| {
+            AppError::bad_request()
+                .with_message("Failed to parse old tags")
+                .with_debug(e.to_string())
+                .at_site(&site)
+        })?;
 
     let old_tags_set: std::collections::HashSet<_> = old_tags.iter().collect();
     let new_tags_set: std::collections::HashSet<_> = payload.tags.iter().collect();
@@ -350,7 +409,8 @@ pub async fn update_post(
             tag_name
         )
         .execute(&mut *tx)
-        .await?;
+        .await
+        .map_err(|e| AppError::from(e).at_site(&site))?;
     }
     for tag_name in tags_to_add {
         let tag_uuid = uuid::Uuid::new_v4();
@@ -368,11 +428,16 @@ pub async fn update_post(
             payload.visibility_mask
         )
         .execute(&mut *tx)
-        .await?;
+        .await
+        .map_err(|e| AppError::from(e).at_site(&site))?;
     }
 
-    let tags_json = serde_json::to_value(&payload.tags)
-        .map_err(|_| AppError::Anyhow(anyhow::anyhow!("Failed to parse tags")))?;
+    let tags_json = serde_json::to_value(&payload.tags).map_err(|e| {
+        AppError::bad_request()
+            .with_message("Failed to parse tags")
+            .with_debug(e.to_string())
+            .at_site(&site)
+    })?;
 
     let post = sqlx::query_as::<_, Post>(
         r#"
@@ -415,9 +480,12 @@ pub async fn update_post(
     .bind(Utc::now())
     .bind(uuid)
     .fetch_one(&mut *tx)
-    .await?;
+    .await
+    .map_err(|e| AppError::from(e).at_site(&site))?;
 
-    tx.commit().await?;
+    tx.commit()
+        .await
+        .map_err(|e| AppError::from(e).at_site(&site))?;
 
     Ok(Json(post.into()))
 }

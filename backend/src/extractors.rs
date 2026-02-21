@@ -10,6 +10,7 @@ pub struct SiteIdentity {
     pub mask: i32,
     pub domain: String,
     pub requires_auth: bool,
+    pub gpg_email: Option<String>,
 }
 
 impl<S> FromRequestParts<S> for SiteIdentity
@@ -47,12 +48,13 @@ where
         )
         .fetch_optional(&pool)
         .await?
-        .ok_or_else(|| AppError::Unauthorized)?;
+        .ok_or_else(|| AppError::unauthorized())?;
 
         Ok(SiteIdentity {
             mask: site.site_mask_bit,
             domain: host,
             requires_auth: site.requires_auth.unwrap_or(false),
+            gpg_email: config.gpg_email.clone(),
         })
     }
 }

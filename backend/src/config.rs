@@ -13,6 +13,7 @@ pub struct AppConfig {
     pub run_migrations: bool,
     pub server_addr: String,
     pub allow_debug_headers: bool,
+    pub gpg_email: Option<String>,
     pub sites: Vec<SiteConfig>,
 }
 

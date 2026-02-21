@@ -3,7 +3,7 @@ use crate::extractors::SiteIdentity;
 use crate::params::SearchParams;
 use axum::{
     Json,
-    extract::{Path, Query, State},
+    extract::{Path, Query, State, rejection::QueryRejection},
     http::StatusCode,
 };
 use serde::{Deserialize, Serialize};
@@ -26,21 +26,28 @@ pub struct TagResponse {
 pub async fn fetch_tags(
     State(pool): State<PgPool>,
     site: SiteIdentity,
-    Query(params): Query<SearchParams<TagSort>>,
+    params: Result<Query<SearchParams<TagSort>>, QueryRejection>,
 ) -> Result<Json<Vec<TagResponse>>, AppError> {
+    let Query(params) = params.map_err(|e| {
+        AppError::bad_request()
+            .with_debug(e.to_string())
+            .at_site(&site)
+    })?;
+
     let order_col = match params.sort() {
-        Some(&TagSort::Popularity) => "selected_count",
-        Some(&TagSort::Usage) => "use_count",
+        Some(TagSort::Popularity) => "selected_count",
+        Some(TagSort::Usage) => "use_count",
         _ => "tag_name",
     };
 
     let direction = params.sort_by().to_sql();
+    let search_pattern = params.search().map(|s| format!("%{}%", s));
 
     let query = format!(
         "SELECT tag_name, tag_uuid FROM tag_stats
          WHERE (visibility_mask & $1) > 0
          AND ($4::TEXT IS NULL OR tag_name ILIKE $4)
-         ORDER BY {} {}
+         ORDER BY {} {}, tag_name ASC
          LIMIT $2 OFFSET $3",
         order_col, direction
     );
@@ -49,8 +56,10 @@ pub async fn fetch_tags(
         .bind(site.mask)
         .bind(params.limit())
         .bind(params.offset())
+        .bind(search_pattern)
         .fetch_all(&pool)
-        .await?
+        .await
+        .map_err(|e| AppError::from(e).at_site(&site))?
         .into_iter()
         .map(|(name, uuid)| TagResponse { name, uuid })
         .collect();
@@ -61,8 +70,14 @@ pub async fn fetch_tags(
 pub async fn increment_tag_selection(
     State(pool): State<PgPool>,
     site: SiteIdentity,
-    Path(tag_uuid): Path<uuid::Uuid>,
+    Path(identifier): Path<String>,
 ) -> Result<StatusCode, AppError> {
+    let tag_uuid = uuid::Uuid::parse_str(&identifier).map_err(|e| {
+        AppError::bad_request()
+            .with_debug(e.to_string())
+            .at_site(&site)
+    })?;
+
     let result = sqlx::query!(
         r#"
             UPDATE tag_stats
@@ -74,10 +89,11 @@ pub async fn increment_tag_selection(
         site.mask
     )
     .execute(&pool)
-    .await?;
+    .await
+    .map_err(|e| AppError::from(e).at_site(&site))?;
 
     if result.rows_affected() == 0 {
-        return Err(AppError::NotFound);
+        return Err(AppError::not_found().at_site(&site));
     }
     Ok(StatusCode::NO_CONTENT)
 }
