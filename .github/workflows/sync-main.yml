@@ -1,0 +1,28 @@
+name: Sync Public to Main
+
+on:
+    push:
+        branches:
+            - public
+
+permissions:
+    contents: write
+
+jobs:
+    sync-branch:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0 # Fetches all history for all branches
+
+            - name: Sync branches
+              run: |
+                  git config --global user.name "GitHub Action"
+                  git config --global user.email "action@github.com"
+
+                  # Force the main branch to match the current state of public
+                  git checkout main
+                  git reset --hard origin/public
+                  git push origin main --force
